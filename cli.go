@@ -52,6 +52,15 @@ func (cli *Cli) Run(args []string) error {
 	return cli.root.Execute()
 }
 
+// cleanMarkdownCodeBlocks removes markdown code block markers from the text
+func cleanMarkdownCodeBlocks(text string) string {
+	// Remove ``` at the start and end of the text
+	text = strings.TrimSpace(text)
+	text = strings.TrimPrefix(text, "```")
+	text = strings.TrimSuffix(text, "```")
+	return strings.TrimSpace(text)
+}
+
 func (cli *Cli) commit(cmd *cobra.Command, args []string) error {
 	// Get staged changes
 	diff, err := cli.git.GetStagedDiff()
@@ -69,6 +78,9 @@ func (cli *Cli) commit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("error getting commit message from AI: %w", err)
 	}
+
+	// Clean up the message
+	message = cleanMarkdownCodeBlocks(message)
 
 	// Execute git commit
 	if err := cli.git.Commit(message); err != nil {
@@ -108,6 +120,9 @@ func (cli *Cli) createPR(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("error getting PR description from AI: %w", err)
 	}
+
+	// Clean up the description
+	description = cleanMarkdownCodeBlocks(description)
 
 	// Create PR title from the first line of the description
 	title := strings.Split(description, "\n")[0]

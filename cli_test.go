@@ -157,3 +157,85 @@ func TestCli_CreatePR_NoCommits(t *testing.T) {
 		t.Errorf("Expected error about no commits, got: %v", err)
 	}
 }
+
+func TestCli_Commit_WithMarkdown(t *testing.T) {
+	// Create a mock model that returns a commit message wrapped in markdown code blocks
+	model := &mockModel{
+		queryFunc: func(ctx context.Context, query string) (string, error) {
+			return "```\ntest: add new feature\n```", nil
+		},
+	}
+
+	// Create a mock git that returns staged changes and succeeds on commit
+	git := &mockGit{
+		getStagedDiffFunc: func() (string, error) {
+			return "diff --git a/file.txt b/file.txt\n+++ b/file.txt\n@@ -0,0 +1 @@\n+new content", nil
+		},
+		commitFunc: func(message string) error {
+			if message != "test: add new feature" {
+				t.Errorf("Expected cleaned message, got: %s", message)
+			}
+			return nil
+		},
+	}
+
+	// Create a mock GitHub (not used in commit test but required by NewCli)
+	github := &mockGitHub{
+		createPRFunc: func(title, description string) error {
+			return nil
+		},
+	}
+
+	cli := NewCli(model, git, github)
+
+	// Test the commit command
+	err := cli.Run([]string{"aigit", "commit"})
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+func TestCli_CreatePR_WithMarkdown(t *testing.T) {
+	// Create a mock model that returns a PR description wrapped in markdown code blocks
+	model := &mockModel{
+		queryFunc: func(ctx context.Context, query string) (string, error) {
+			return "```\nfeat: add new feature\n\nThis PR adds a new feature that improves the user experience.\n```", nil
+		},
+	}
+
+	// Create a mock git that returns branch info
+	git := &mockGit{
+		getCurrentBranchFunc: func() (string, error) {
+			return "feature-branch", nil
+		},
+		getBaseBranchFunc: func() (string, error) {
+			return "main", nil
+		},
+		getCommitHistoryFunc: func(baseBranch string) (string, error) {
+			return "abc123 feat: add new feature\ndef456 fix: bug in feature", nil
+		},
+	}
+
+	// Create a mock GitHub that verifies the cleaned description
+	github := &mockGitHub{
+		createPRFunc: func(title, description string) error {
+			expectedTitle := "feat: add new feature"
+			expectedDesc := "feat: add new feature\n\nThis PR adds a new feature that improves the user experience."
+			if title != expectedTitle {
+				t.Errorf("Expected title %q, got %q", expectedTitle, title)
+			}
+			if description != expectedDesc {
+				t.Errorf("Expected description %q, got %q", expectedDesc, description)
+			}
+			return nil
+		},
+	}
+
+	cli := NewCli(model, git, github)
+
+	// Test the PR command
+	err := cli.Run([]string{"aigit", "pr"})
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
