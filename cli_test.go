@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"testing"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 type mockModel struct {
@@ -79,490 +81,328 @@ func (m *mockGitHub) HasOpenPullRequest() (bool, error) {
 	return m.hasOpenPullRequestFunc()
 }
 
-func TestCli_Commit(t *testing.T) {
-	// Create a mock model that returns a predefined commit message
-	model := &mockModel{
-		queryFunc: func(ctx context.Context, query string) (string, error) {
-			return "test: add new feature", nil
-		},
-	}
+var _ = Describe("CLI", func() {
+	var (
+		model  *mockModel
+		git    *mockGit
+		github *mockGitHub
+		cli    *Cli
+	)
 
-	// Create a mock git that returns staged changes and succeeds on commit
-	git := &mockGit{
-		getStagedDiffFunc: func() (string, error) {
-			return "diff --git a/file.txt b/file.txt\n+++ b/file.txt\n@@ -0,0 +1 @@\n+new content", nil
-		},
-		commitFunc: func(message string) error {
-			return nil
-		},
-	}
+	BeforeEach(func() {
+		model = &mockModel{}
+		git = &mockGit{}
+		github = &mockGitHub{}
+		cli = NewCli(model, git, github)
+	})
 
-	// Create a mock GitHub (not used in commit test but required by NewCli)
-	github := &mockGitHub{
-		createPRFunc: func(title, description string) error {
-			return nil
-		},
-	}
+	Describe("Commit", func() {
+		Context("when there are staged changes", func() {
+			BeforeEach(func() {
+				model.queryFunc = func(ctx context.Context, query string) (string, error) {
+					time.Sleep(50 * time.Millisecond)
+					return "test: add new feature", nil
+				}
+				git.getStagedDiffFunc = func() (string, error) {
+					return "diff --git a/file.txt b/file.txt\n+++ b/file.txt\n@@ -0,0 +1 @@\n+new content", nil
+				}
+				git.commitFunc = func(message string) error {
+					return nil
+				}
+				github.createPRFunc = func(title, description string) error {
+					return nil
+				}
+			})
 
-	cli := NewCli(model, git, github)
-
-	// Test the commit command
-	err := cli.Run([]string{"aigit", "commit"})
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-}
-
-func TestCli_CreatePR(t *testing.T) {
-	// Create a mock model that returns a predefined PR description and title
-	model := &mockModel{
-		queryFunc: func(ctx context.Context, query string) (string, error) {
-			if strings.Contains(query, "generate a concise, descriptive title") {
-				return "feat: add new feature", nil
-			}
-			return "This PR adds a new feature that improves the user experience.", nil
-		},
-	}
-
-	// Create a mock git that returns branch info
-	git := &mockGit{
-		getCurrentBranchFunc: func() (string, error) {
-			return "feature-branch", nil
-		},
-		getBaseBranchFunc: func() (string, error) {
-			return "main", nil
-		},
-		getCommitHistoryFunc: func(baseBranch string) (string, error) {
-			return "abc123 feat: add new feature\ndef456 fix: bug in feature", nil
-		},
-		pushFunc: func() error {
-			return nil
-		},
-		forcePushFunc: func() error {
-			return nil
-		},
-	}
-
-	// Create a mock GitHub that succeeds on PR creation
-	github := &mockGitHub{
-		createPRFunc: func(title, description string) error {
-			if title != "feat: add new feature" {
-				t.Errorf("Expected title 'feat: add new feature', got '%s'", title)
-			}
-			return nil
-		},
-		hasOpenPullRequestFunc: func() (bool, error) {
-			return false, nil
-		},
-	}
-
-	cli := NewCli(model, git, github)
-
-	// Test the PR command
-	err := cli.Run([]string{"aigit", "pr"})
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-}
-
-func TestCli_CreatePR_NoCommits(t *testing.T) {
-	model := &mockModel{
-		queryFunc: func(ctx context.Context, query string) (string, error) {
-			return "", nil
-		},
-	}
-
-	git := &mockGit{
-		getCurrentBranchFunc: func() (string, error) {
-			return "feature-branch", nil
-		},
-		getBaseBranchFunc: func() (string, error) {
-			return "main", nil
-		},
-		getCommitHistoryFunc: func(baseBranch string) (string, error) {
-			return "", nil
-		},
-		pushFunc: func() error {
-			return nil
-		},
-		forcePushFunc: func() error {
-			return nil
-		},
-	}
-
-	github := &mockGitHub{
-		createPRFunc: func(title, description string) error {
-			return nil
-		},
-	}
-
-	cli := NewCli(model, git, github)
-
-	// Test the PR command with no commits
-	err := cli.Run([]string{"aigit", "pr"})
-	if err == nil {
-		t.Error("Expected error for no commits, got nil")
-	}
-	if !strings.Contains(err.Error(), "no commits found") {
-		t.Errorf("Expected error about no commits, got: %v", err)
-	}
-}
-
-func TestCli_Commit_WithMarkdown(t *testing.T) {
-	// Create a mock model that returns a commit message wrapped in markdown code blocks
-	model := &mockModel{
-		queryFunc: func(ctx context.Context, query string) (string, error) {
-			return "```\ntest: add new feature\n```", nil
-		},
-	}
-
-	// Create a mock git that returns staged changes and succeeds on commit
-	git := &mockGit{
-		getStagedDiffFunc: func() (string, error) {
-			return "diff --git a/file.txt b/file.txt\n+++ b/file.txt\n@@ -0,0 +1 @@\n+new content", nil
-		},
-		commitFunc: func(message string) error {
-			if message != "test: add new feature" {
-				t.Errorf("Expected cleaned message, got: %s", message)
-			}
-			return nil
-		},
-	}
-
-	// Create a mock GitHub (not used in commit test but required by NewCli)
-	github := &mockGitHub{
-		createPRFunc: func(title, description string) error {
-			return nil
-		},
-	}
-
-	cli := NewCli(model, git, github)
-
-	// Test the commit command
-	err := cli.Run([]string{"aigit", "commit"})
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-}
-
-func TestCli_CreatePR_WithMarkdown(t *testing.T) {
-	// Create a mock model that returns a PR description and title wrapped in markdown
-	model := &mockModel{
-		queryFunc: func(ctx context.Context, query string) (string, error) {
-			if strings.Contains(query, "generate a concise, descriptive title") {
-				return "```\nfeat: add new feature\n```", nil
-			}
-			return "```\nThis PR adds a new feature that improves the user experience.\n```", nil
-		},
-	}
-
-	// Create a mock git that returns branch info
-	git := &mockGit{
-		getCurrentBranchFunc: func() (string, error) {
-			return "feature-branch", nil
-		},
-		getBaseBranchFunc: func() (string, error) {
-			return "main", nil
-		},
-		getCommitHistoryFunc: func(baseBranch string) (string, error) {
-			return "abc123 feat: add new feature\ndef456 fix: bug in feature", nil
-		},
-		pushFunc: func() error {
-			return nil
-		},
-		forcePushFunc: func() error {
-			return nil
-		},
-	}
-
-	// Create a mock GitHub that verifies the cleaned description and title
-	github := &mockGitHub{
-		createPRFunc: func(title, description string) error {
-			expectedTitle := "feat: add new feature"
-			expectedDesc := "This PR adds a new feature that improves the user experience."
-			if title != expectedTitle {
-				t.Errorf("Expected title %q, got %q", expectedTitle, title)
-			}
-			if description != expectedDesc {
-				t.Errorf("Expected description %q, got %q", expectedDesc, description)
-			}
-			return nil
-		},
-		hasOpenPullRequestFunc: func() (bool, error) {
-			return false, nil
-		},
-	}
-
-	cli := NewCli(model, git, github)
-
-	// Test the PR command
-	err := cli.Run([]string{"aigit", "pr"})
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-}
-
-func TestCli_CreatePR_GitHubError(t *testing.T) {
-	// Create a mock model that returns a predefined PR description
-	model := &mockModel{
-		queryFunc: func(ctx context.Context, query string) (string, error) {
-			if strings.Contains(query, "generate a concise, descriptive title") {
-				return "feat: add new feature", nil
-			}
-			return "This PR adds a new feature that improves the user experience.", nil
-		},
-	}
-
-	// Create a mock git that returns branch info
-	git := &mockGit{
-		getCurrentBranchFunc: func() (string, error) {
-			return "feature-branch", nil
-		},
-		getBaseBranchFunc: func() (string, error) {
-			return "main", nil
-		},
-		getCommitHistoryFunc: func(baseBranch string) (string, error) {
-			return "abc123 feat: add new feature\ndef456 fix: bug in feature", nil
-		},
-		pushFunc: func() error {
-			return nil
-		},
-		forcePushFunc: func() error {
-			return nil
-		},
-	}
-
-	// Create a mock GitHub that fails on PR creation
-	github := &mockGitHub{
-		createPRFunc: func(title, description string) error {
-			return fmt.Errorf("gh auth login")
-		},
-		hasOpenPullRequestFunc: func() (bool, error) {
-			return false, nil
-		},
-		editPRFunc: func(title, description string) error {
-			return nil
-		},
-	}
-
-	cli := NewCli(model, git, github)
-
-	// Test the PR command
-	err := cli.Run([]string{"aigit", "pr"})
-	if err == nil {
-		t.Error("Expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "gh auth login") {
-		t.Errorf("Expected error to contain 'gh auth login', got: %v", err)
-	}
-}
-
-func TestCli_CreatePR_WithForcePush(t *testing.T) {
-	model := &mockModel{
-		queryFunc: func(ctx context.Context, query string) (string, error) {
-			if strings.Contains(query, "generate a concise, descriptive title") {
-				return "feat: force push feature", nil
-			}
-			return "This PR adds a new feature that required force push.", nil
-		},
-	}
-	git := &mockGit{
-		getCurrentBranchFunc: func() (string, error) { return "feature-branch", nil },
-		getBaseBranchFunc:    func() (string, error) { return "main", nil },
-		getCommitHistoryFunc: func(baseBranch string) (string, error) {
-			return "abc123 feat: add new feature\ndef456 fix: bug in feature", nil
-		},
-		pushFunc:      func() error { return fmt.Errorf("push failed") },
-		forcePushFunc: func() error { return nil },
-	}
-	github := &mockGitHub{
-		createPRFunc:           func(title, description string) error { return nil },
-		hasOpenPullRequestFunc: func() (bool, error) { return false, nil },
-		editPRFunc:             func(title, description string) error { return nil },
-	}
-	cli := NewCli(model, git, github)
-	err := cli.Run([]string{"aigit", "pr"})
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-}
-
-func TestCli_CreatePR_PushFailed(t *testing.T) {
-	model := &mockModel{
-		queryFunc: func(ctx context.Context, query string) (string, error) {
-			return "feat: add new feature\n\nThis PR adds a new feature.", nil
-		},
-	}
-
-	git := &mockGit{
-		getCurrentBranchFunc: func() (string, error) {
-			return "feature-branch", nil
-		},
-		getBaseBranchFunc: func() (string, error) {
-			return "main", nil
-		},
-		getCommitHistoryFunc: func(baseBranch string) (string, error) {
-			return "abc123 feat: add new feature", nil
-		},
-		pushFunc: func() error {
-			return fmt.Errorf("push failed")
-		},
-		forcePushFunc: func() error {
-			return fmt.Errorf("force push failed")
-		},
-	}
-
-	github := &mockGitHub{
-		createPRFunc: func(title, description string) error {
-			return nil
-		},
-	}
-
-	cli := NewCli(model, git, github)
-
-	// Test the PR command
-	err := cli.Run([]string{"aigit", "pr"})
-	if err == nil {
-		t.Error("Expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed to push branch") {
-		t.Errorf("Expected error about push failure, got: %v", err)
-	}
-}
-
-func TestCleanMarkdownCodeBlocks(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "simple text",
-			input:    "feat: add new feature",
-			expected: "feat: add new feature",
-		},
-		{
-			name:     "with markdown",
-			input:    "```\nfeat: add new feature\n```",
-			expected: "feat: add new feature",
-		},
-		{
-			name:     "with AI prefix",
-			input:    "AI: feat: add new feature",
-			expected: "feat: add new feature",
-		},
-		{
-			name:     "with AI prefix and markdown",
-			input:    "```\nAI: feat: add new feature\n```",
-			expected: "feat: add new feature",
-		},
-		{
-			name:     "with duplicate lines",
-			input:    "feat: add new feature\n\nfeat: add new feature",
-			expected: "feat: add new feature",
-		},
-		{
-			name:     "with AI prefix and duplicate lines",
-			input:    "AI: feat: add new feature\n\nfeat: add new feature",
-			expected: "feat: add new feature",
-		},
-		{
-			name:     "with AI prefix, markdown, and duplicate lines",
-			input:    "```\nAI: feat: add new feature\n\nfeat: add new feature\n```",
-			expected: "feat: add new feature",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := cleanMarkdownCodeBlocks(tt.input)
-			if result != tt.expected {
-				t.Errorf("cleanMarkdownCodeBlocks(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
+			It("should create a commit with AI-generated message", func() {
+				err := cli.Run([]string{"aigit", "commit"})
+				Expect(err).NotTo(HaveOccurred())
+			})
 		})
-	}
-}
 
-func TestCli_Amend(t *testing.T) {
-	// Create a mock model that returns a predefined commit message
-	model := &mockModel{
-		queryFunc: func(ctx context.Context, query string) (string, error) {
-			return "test: update feature", nil
-		},
-	}
+		Context("when there are no staged changes", func() {
+			BeforeEach(func() {
+				git.getStagedDiffFunc = func() (string, error) {
+					return "", nil
+				}
+			})
 
-	// Create a mock git that returns staged changes
-	git := &mockGit{
-		getStagedDiffFunc: func() (string, error) {
-			return "diff --git a/file.txt b/file.txt\nindex abc123..def456 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old line\n+new line", nil
-		},
-		amendFunc: func(message string) error {
-			return nil
-		},
-	}
+			It("should return an error", func() {
+				err := cli.Run([]string{"aigit", "commit"})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("no changes staged for commit"))
+			})
+		})
 
-	cli := NewCli(model, git, nil)
+		Context("when the AI response contains markdown", func() {
+			BeforeEach(func() {
+				model.queryFunc = func(ctx context.Context, query string) (string, error) {
+					time.Sleep(50 * time.Millisecond)
+					return "```\ntest: add new feature\n```", nil
+				}
+				git.getStagedDiffFunc = func() (string, error) {
+					return "diff --git a/file.txt b/file.txt\n+++ b/file.txt\n@@ -0,0 +1 @@\n+new content", nil
+				}
+				git.commitFunc = func(message string) error {
+					Expect(message).To(Equal("test: add new feature"))
+					return nil
+				}
+				github.createPRFunc = func(title, description string) error {
+					return nil
+				}
+			})
 
-	// Test the amend command
-	err := cli.Run([]string{"aigit", "amend"})
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-}
+			It("should clean the markdown from the commit message", func() {
+				err := cli.Run([]string{"aigit", "commit"})
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+	})
 
-func TestCli_Amend_NoChanges(t *testing.T) {
-	// Create a mock model
-	model := &mockModel{
-		queryFunc: func(ctx context.Context, query string) (string, error) {
-			return "test: update feature", nil
-		},
-	}
+	Describe("CreatePR", func() {
+		Context("when there are commits to create a PR for", func() {
+			BeforeEach(func() {
+				model.queryFunc = func(ctx context.Context, query string) (string, error) {
+					time.Sleep(50 * time.Millisecond)
+					if strings.Contains(query, "generate a concise, descriptive title") {
+						return "feat: add new feature", nil
+					}
+					return "This PR adds a new feature that improves the user experience.", nil
+				}
+				git.getCurrentBranchFunc = func() (string, error) {
+					return "feature-branch", nil
+				}
+				git.getBaseBranchFunc = func() (string, error) {
+					return "main", nil
+				}
+				git.getCommitHistoryFunc = func(baseBranch string) (string, error) {
+					return "abc123 feat: add new feature\ndef456 fix: bug in feature", nil
+				}
+				git.pushFunc = func() error {
+					return nil
+				}
+				git.forcePushFunc = func() error {
+					return nil
+				}
+				github.createPRFunc = func(title, description string) error {
+					Expect(title).To(Equal("feat: add new feature"))
+					return nil
+				}
+				github.hasOpenPullRequestFunc = func() (bool, error) {
+					return false, nil
+				}
+			})
 
-	// Create a mock git that returns no staged changes
-	git := &mockGit{
-		getStagedDiffFunc: func() (string, error) {
-			return "", nil
-		},
-	}
+			It("should create a pull request", func() {
+				err := cli.Run([]string{"aigit", "pr"})
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
 
-	cli := NewCli(model, git, nil)
+		Context("when there are no commits", func() {
+			BeforeEach(func() {
+				git.getCurrentBranchFunc = func() (string, error) {
+					return "feature-branch", nil
+				}
+				git.getBaseBranchFunc = func() (string, error) {
+					return "main", nil
+				}
+				git.getCommitHistoryFunc = func(baseBranch string) (string, error) {
+					return "", nil
+				}
+			})
 
-	// Test the amend command
-	err := cli.Run([]string{"aigit", "amend"})
-	if err == nil {
-		t.Error("Expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "no changes staged for amend") {
-		t.Errorf("Expected error about no changes, got: %v", err)
-	}
-}
+			It("should return an error", func() {
+				err := cli.Run([]string{"aigit", "pr"})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("no commits found"))
+			})
+		})
 
-func TestCli_Amend_WithMarkdown(t *testing.T) {
-	// Create a mock model that returns a commit message wrapped in markdown
-	model := &mockModel{
-		queryFunc: func(ctx context.Context, query string) (string, error) {
-			return "```\ntest: update feature\n```", nil
-		},
-	}
+		Context("when GitHub authentication fails", func() {
+			BeforeEach(func() {
+				model.queryFunc = func(ctx context.Context, query string) (string, error) {
+					time.Sleep(50 * time.Millisecond)
+					if strings.Contains(query, "generate a concise, descriptive title") {
+						return "feat: add new feature", nil
+					}
+					return "This PR adds a new feature.", nil
+				}
+				git.getCurrentBranchFunc = func() (string, error) {
+					return "feature-branch", nil
+				}
+				git.getBaseBranchFunc = func() (string, error) {
+					return "main", nil
+				}
+				git.getCommitHistoryFunc = func(baseBranch string) (string, error) {
+					return "abc123 feat: add new feature", nil
+				}
+				git.pushFunc = func() error {
+					return nil
+				}
+				git.forcePushFunc = func() error {
+					return nil
+				}
+				github.createPRFunc = func(title, description string) error {
+					return fmt.Errorf("gh auth login")
+				}
+				github.hasOpenPullRequestFunc = func() (bool, error) {
+					return false, nil
+				}
+				github.editPRFunc = func(title, description string) error {
+					return nil
+				}
+			})
 
-	// Create a mock git that returns staged changes
-	git := &mockGit{
-		getStagedDiffFunc: func() (string, error) {
-			return "diff --git a/file.txt b/file.txt\nindex abc123..def456 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old line\n+new line", nil
-		},
-		amendFunc: func(message string) error {
-			if message != "test: update feature" {
-				t.Errorf("Expected message 'test: update feature', got '%s'", message)
-			}
-			return nil
-		},
-	}
+			It("should return an error", func() {
+				err := cli.Run([]string{"aigit", "pr"})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("gh auth login"))
+			})
+		})
 
-	cli := NewCli(model, git, nil)
+		Context("when force push is required", func() {
+			BeforeEach(func() {
+				model.queryFunc = func(ctx context.Context, query string) (string, error) {
+					time.Sleep(50 * time.Millisecond)
+					if strings.Contains(query, "generate a concise, descriptive title") {
+						return "feat: force push feature", nil
+					}
+					return "This PR adds a new feature that required force push.", nil
+				}
+				git.getCurrentBranchFunc = func() (string, error) {
+					return "feature-branch", nil
+				}
+				git.getBaseBranchFunc = func() (string, error) {
+					return "main", nil
+				}
+				git.getCommitHistoryFunc = func(baseBranch string) (string, error) {
+					return "abc123 feat: add new feature\ndef456 fix: bug in feature", nil
+				}
+				git.pushFunc = func() error {
+					return fmt.Errorf("push failed")
+				}
+				git.forcePushFunc = func() error {
+					return nil
+				}
+				github.createPRFunc = func(title, description string) error {
+					return nil
+				}
+				github.hasOpenPullRequestFunc = func() (bool, error) {
+					return false, nil
+				}
+			})
 
-	// Test the amend command
-	err := cli.Run([]string{"aigit", "amend"})
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-}
+			It("should attempt force push and create PR", func() {
+				err := cli.Run([]string{"aigit", "pr"})
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		Context("when both push and force push fail", func() {
+			BeforeEach(func() {
+				model.queryFunc = func(ctx context.Context, query string) (string, error) {
+					time.Sleep(50 * time.Millisecond)
+					return "feat: add new feature", nil
+				}
+				git.getCurrentBranchFunc = func() (string, error) {
+					return "feature-branch", nil
+				}
+				git.getBaseBranchFunc = func() (string, error) {
+					return "main", nil
+				}
+				git.getCommitHistoryFunc = func(baseBranch string) (string, error) {
+					return "abc123 feat: add new feature", nil
+				}
+				git.pushFunc = func() error {
+					return fmt.Errorf("push failed")
+				}
+				git.forcePushFunc = func() error {
+					return fmt.Errorf("force push failed")
+				}
+				github.createPRFunc = func(title, description string) error {
+					return nil
+				}
+			})
+
+			It("should return an error", func() {
+				err := cli.Run([]string{"aigit", "pr"})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("failed to push branch"))
+			})
+		})
+	})
+
+	Describe("Amend", func() {
+		Context("when there are staged changes", func() {
+			BeforeEach(func() {
+				model.queryFunc = func(ctx context.Context, query string) (string, error) {
+					time.Sleep(50 * time.Millisecond)
+					return "test: update feature", nil
+				}
+				git.getStagedDiffFunc = func() (string, error) {
+					return "diff --git a/file.txt b/file.txt\nindex abc123..def456 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old line\n+new line", nil
+				}
+				git.amendFunc = func(message string) error {
+					return nil
+				}
+			})
+
+			It("should amend the commit with AI-generated message", func() {
+				err := cli.Run([]string{"aigit", "amend"})
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		Context("when there are no staged changes", func() {
+			BeforeEach(func() {
+				git.getStagedDiffFunc = func() (string, error) {
+					return "", nil
+				}
+			})
+
+			It("should return an error", func() {
+				err := cli.Run([]string{"aigit", "amend"})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("no changes staged for amend"))
+			})
+		})
+
+		Context("when the AI response contains markdown", func() {
+			BeforeEach(func() {
+				model.queryFunc = func(ctx context.Context, query string) (string, error) {
+					time.Sleep(50 * time.Millisecond)
+					return "```\ntest: update feature\n```", nil
+				}
+				git.getStagedDiffFunc = func() (string, error) {
+					return "diff --git a/file.txt b/file.txt\nindex abc123..def456 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old line\n+new line", nil
+				}
+				git.amendFunc = func(message string) error {
+					Expect(message).To(Equal("test: update feature"))
+					return nil
+				}
+			})
+
+			It("should clean the markdown from the commit message", func() {
+				err := cli.Run([]string{"aigit", "amend"})
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+	})
+
+	Describe("CleanMarkdownCodeBlocks", func() {
+		DescribeTable("cleaning markdown and AI prefixes",
+			func(input, expected string) {
+				result := cleanMarkdownCodeBlocks(input)
+				Expect(result).To(Equal(expected))
+			},
+			Entry("simple text", "feat: add new feature", "feat: add new feature"),
+			Entry("with markdown", "```\nfeat: add new feature\n```", "feat: add new feature"),
+			Entry("with AI prefix", "AI: feat: add new feature", "feat: add new feature"),
+			Entry("with AI prefix and markdown", "```\nAI: feat: add new feature\n```", "feat: add new feature"),
+			Entry("with duplicate lines", "feat: add new feature\n\nfeat: add new feature", "feat: add new feature"),
+			Entry("with AI prefix and duplicate lines", "AI: feat: add new feature\n\nfeat: add new feature", "feat: add new feature"),
+			Entry("with AI prefix, markdown, and duplicate lines", "```\nAI: feat: add new feature\n\nfeat: add new feature\n```", "feat: add new feature"),
+		)
+	})
+})
