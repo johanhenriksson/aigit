@@ -2,6 +2,7 @@ package aigit
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -14,8 +15,11 @@ func (m *mockModel) Query(ctx context.Context, query string) (string, error) {
 }
 
 type mockGit struct {
-	getStagedDiffFunc func() (string, error)
-	commitFunc        func(message string) error
+	getStagedDiffFunc    func() (string, error)
+	commitFunc           func(message string) error
+	getCurrentBranchFunc func() (string, error)
+	getBaseBranchFunc    func() (string, error)
+	getCommitHistoryFunc func(baseBranch string) (string, error)
 }
 
 func (m *mockGit) GetStagedDiff() (string, error) {
@@ -24,6 +28,26 @@ func (m *mockGit) GetStagedDiff() (string, error) {
 
 func (m *mockGit) Commit(message string) error {
 	return m.commitFunc(message)
+}
+
+func (m *mockGit) GetCurrentBranch() (string, error) {
+	return m.getCurrentBranchFunc()
+}
+
+func (m *mockGit) GetBaseBranch() (string, error) {
+	return m.getBaseBranchFunc()
+}
+
+func (m *mockGit) GetCommitHistory(baseBranch string) (string, error) {
+	return m.getCommitHistoryFunc(baseBranch)
+}
+
+type mockGitHub struct {
+	createPRFunc func(title, description string) error
+}
+
+func (m *mockGitHub) CreatePullRequest(title, description string) error {
+	return m.createPRFunc(title, description)
 }
 
 func TestCli_Commit(t *testing.T) {
@@ -44,11 +68,92 @@ func TestCli_Commit(t *testing.T) {
 		},
 	}
 
-	cli := NewCli(model, git)
+	// Create a mock GitHub (not used in commit test but required by NewCli)
+	github := &mockGitHub{
+		createPRFunc: func(title, description string) error {
+			return nil
+		},
+	}
+
+	cli := NewCli(model, git, github)
 
 	// Test the commit command
 	err := cli.Run([]string{"aigit", "commit"})
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+func TestCli_CreatePR(t *testing.T) {
+	// Create a mock model that returns a predefined PR description
+	model := &mockModel{
+		queryFunc: func(ctx context.Context, query string) (string, error) {
+			return "feat: add new feature\n\nThis PR adds a new feature that improves the user experience.", nil
+		},
+	}
+
+	// Create a mock git that returns branch info
+	git := &mockGit{
+		getCurrentBranchFunc: func() (string, error) {
+			return "feature-branch", nil
+		},
+		getBaseBranchFunc: func() (string, error) {
+			return "main", nil
+		},
+		getCommitHistoryFunc: func(baseBranch string) (string, error) {
+			return "abc123 feat: add new feature\ndef456 fix: bug in feature", nil
+		},
+	}
+
+	// Create a mock GitHub that succeeds on PR creation
+	github := &mockGitHub{
+		createPRFunc: func(title, description string) error {
+			return nil
+		},
+	}
+
+	cli := NewCli(model, git, github)
+
+	// Test the PR command
+	err := cli.Run([]string{"aigit", "pr"})
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+func TestCli_CreatePR_NoCommits(t *testing.T) {
+	model := &mockModel{
+		queryFunc: func(ctx context.Context, query string) (string, error) {
+			return "", nil
+		},
+	}
+
+	git := &mockGit{
+		getCurrentBranchFunc: func() (string, error) {
+			return "feature-branch", nil
+		},
+		getBaseBranchFunc: func() (string, error) {
+			return "main", nil
+		},
+		getCommitHistoryFunc: func(baseBranch string) (string, error) {
+			return "", nil
+		},
+	}
+
+	github := &mockGitHub{
+		createPRFunc: func(title, description string) error {
+			return nil
+		},
+	}
+
+	cli := NewCli(model, git, github)
+
+	// Test the PR command with no commits
+	err := cli.Run([]string{"aigit", "pr"})
+	if err == nil {
+		t.Error("Expected error for no commits, got nil")
+	}
+	if !strings.Contains(err.Error(), "no commits found") {
+		t.Errorf("Expected error about no commits, got: %v", err)
 	}
 }
