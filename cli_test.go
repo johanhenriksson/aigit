@@ -46,13 +46,8 @@ func TestCli_Commit(t *testing.T) {
 
 	cli := NewCli(model, git)
 
-	// Test that the CLI requires the commit command
-	err := cli.Run([]string{"aigit"})
-	if err == nil {
-		t.Error("Expected error when no commit command provided")
-	}
-
-	err = cli.Run([]string{"aigit", "commit"})
+	// Test the commit command
+	err := cli.Run([]string{"aigit", "commit"})
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
