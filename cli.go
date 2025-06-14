@@ -138,11 +138,22 @@ func (cli *Cli) createPR(cmd *cobra.Command, args []string) error {
 	// Create PR title from the first line of the description
 	title := strings.Split(description, "\n")[0]
 
-	// Create the pull request
-	if err := cli.github.CreatePullRequest(title, description); err != nil {
-		return fmt.Errorf("error creating pull request: %w", err)
+	// Check if a PR already exists for this branch
+	hasPR, err := cli.github.HasOpenPullRequest()
+	if err != nil {
+		return fmt.Errorf("error checking for existing pull request: %w", err)
 	}
 
-	fmt.Printf("Created pull request with title:\n%s\n", title)
+	if hasPR {
+		if err := cli.github.EditPullRequest(title, description); err != nil {
+			return fmt.Errorf("error updating pull request: %w", err)
+		}
+		fmt.Printf("Updated pull request with title:\n%s\n", title)
+	} else {
+		if err := cli.github.CreatePullRequest(title, description); err != nil {
+			return fmt.Errorf("error creating pull request: %w", err)
+		}
+		fmt.Printf("Created pull request with title:\n%s\n", title)
+	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 )
 
 var ErrNoGit = errors.New("git is not installed or not found in PATH")
@@ -67,11 +68,32 @@ func (g *GitCli) GetCommitHistory(baseBranch string) (string, error) {
 }
 
 func (g *GitCli) Push() error {
-	_, err := runCommand("git", "push")
+	output, err := runCommand("git", "push")
+	if err != nil && isNoUpstreamError(output) {
+		branch, berr := g.GetCurrentBranch()
+		if berr != nil {
+			return fmt.Errorf("push failed and could not get current branch: %w", berr)
+		}
+		branch = strings.TrimSpace(branch)
+		output, err = runCommand("git", "push", "--set-upstream", "origin", branch)
+	}
 	return err
 }
 
 func (g *GitCli) ForcePush() error {
-	_, err := runCommand("git", "push", "--force")
+	output, err := runCommand("git", "push", "--force")
+	if err != nil && isNoUpstreamError(output) {
+		branch, berr := g.GetCurrentBranch()
+		if berr != nil {
+			return fmt.Errorf("force push failed and could not get current branch: %w", berr)
+		}
+		branch = strings.TrimSpace(branch)
+		output, err = runCommand("git", "push", "--force", "--set-upstream", "origin", branch)
+	}
 	return err
+}
+
+// isNoUpstreamError checks if the output indicates a missing upstream branch
+func isNoUpstreamError(output string) bool {
+	return strings.Contains(output, "has no upstream branch")
 }
