@@ -114,6 +114,17 @@ func (cli *Cli) createPR(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no commits found between %s and %s", baseBranch, currentBranch)
 	}
 
+	// Try to push the branch
+	if err := cli.git.Push(); err != nil {
+		fmt.Println("Regular push failed, attempting force push...")
+		if err := cli.git.ForcePush(); err != nil {
+			return fmt.Errorf("failed to push branch: %w", err)
+		}
+		fmt.Println("Force push successful")
+	} else {
+		fmt.Println("Branch pushed successfully")
+	}
+
 	// Ask AI for PR description
 	query := fmt.Sprintf("Please write a concise and descriptive pull request description for the following changes. Include a summary of the changes and any important notes for reviewers:\n\n%s", history)
 	description, err := cli.model.Query(context.Background(), query)

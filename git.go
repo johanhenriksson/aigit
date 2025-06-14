@@ -20,6 +20,10 @@ type Git interface {
 	GetBaseBranch() (string, error)
 	// GetCommitHistory returns the commit history between current branch and base branch
 	GetCommitHistory(baseBranch string) (string, error)
+	// Push pushes the current branch to remote
+	Push() error
+	// ForcePush force pushes the current branch to remote
+	ForcePush() error
 }
 
 // GitCli implements Git interface using actual git commands
@@ -35,26 +39,16 @@ func NewGit() (Git, error) {
 }
 
 func (g *GitCli) GetStagedDiff() (string, error) {
-	cmd := exec.Command("git", "diff", "--staged")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(output), nil
+	return runCommand("git", "diff", "--staged")
 }
 
 func (g *GitCli) Commit(message string) error {
-	cmd := exec.Command("git", "commit", "-m", message)
-	return cmd.Run()
+	_, err := runCommand("git", "commit", "-m", message)
+	return err
 }
 
 func (g *GitCli) GetCurrentBranch() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(output), nil
+	return runCommand("git", "rev-parse", "--abbrev-ref", "HEAD")
 }
 
 func (g *GitCli) GetBaseBranch() (string, error) {
@@ -69,10 +63,15 @@ func (g *GitCli) GetBaseBranch() (string, error) {
 }
 
 func (g *GitCli) GetCommitHistory(baseBranch string) (string, error) {
-	cmd := exec.Command("git", "log", "--pretty=format:%h %s", baseBranch+"..HEAD")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(output), nil
+	return runCommand("git", "log", "--pretty=format:%h %s", baseBranch+"..HEAD")
+}
+
+func (g *GitCli) Push() error {
+	_, err := runCommand("git", "push")
+	return err
+}
+
+func (g *GitCli) ForcePush() error {
+	_, err := runCommand("git", "push", "--force")
+	return err
 }

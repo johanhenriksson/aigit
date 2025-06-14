@@ -2,6 +2,7 @@ package aigit
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 )
 
@@ -26,6 +27,10 @@ func NewGitHub() (GitHub, error) {
 }
 
 func (g *GitHubCLI) CreatePullRequest(title, description string) error {
-	cmd := exec.Command("gh", "pr", "create", "--title", title, "--body", description)
-	return cmd.Run()
+	output, err := runCommand("gh", "pr", "create", "--title", title, "--body", description)
+	if err != nil {
+		return fmt.Errorf("failed to create pull request: %w", err)
+	}
+	fmt.Print(output)
+	return nil
 }
