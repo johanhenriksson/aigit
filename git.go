@@ -25,6 +25,8 @@ type Git interface {
 	Push() error
 	// ForcePush force pushes the current branch to remote
 	ForcePush() error
+	// Amend amends the last commit
+	Amend(message string) error
 }
 
 // GitCli implements Git interface using actual git commands
@@ -91,6 +93,21 @@ func (g *GitCli) ForcePush() error {
 		output, err = runCommand("git", "push", "--force", "--set-upstream", "origin", branch)
 	}
 	return err
+}
+
+func (g *GitCli) Amend(message string) error {
+	cmd := exec.Command("git", "commit", "--amend", "--no-edit")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("error amending commit: %w", err)
+	}
+
+	// Update the commit message
+	cmd = exec.Command("git", "commit", "--amend", "-m", message)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("error updating commit message: %w", err)
+	}
+
+	return nil
 }
 
 // isNoUpstreamError checks if the output indicates a missing upstream branch
