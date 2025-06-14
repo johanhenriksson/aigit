@@ -53,7 +53,7 @@ func (cli *Cli) commit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ask AI for commit message
-	query := fmt.Sprintf("Please write a concise and descriptive commit message for the following changes:\n\n%s", diff)
+	query := fmt.Sprintf("Please write a concise and descriptive commit message, adhering to conventional commits and in plain text, for the following changes:\n\n%s", diff)
 	message, err := cli.model.Query(context.Background(), query)
 	if err != nil {
 		return fmt.Errorf("error getting commit message from AI: %w", err)
