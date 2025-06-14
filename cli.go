@@ -73,8 +73,13 @@ func (cli *Cli) commit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ask AI for commit message
-	query := fmt.Sprintf("Please write a concise and descriptive commit message, adhering to conventional commits and in plain text, for the following changes:\n\n%s", diff)
-	message, err := cli.model.Query(context.Background(), query)
+	var message string
+	err = WithSpinner("Generating commit message...", func() error {
+		query := fmt.Sprintf("Please write a concise and descriptive commit message, adhering to conventional commits and in plain text, for the following changes:\n\n%s", diff)
+		var err error
+		message, err = cli.model.Query(context.Background(), query)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("error getting commit message from AI: %w", err)
 	}
@@ -125,26 +130,34 @@ func (cli *Cli) createPR(cmd *cobra.Command, args []string) error {
 		fmt.Println("Branch pushed successfully")
 	}
 
-	// Ask AI for PR description
-	query := fmt.Sprintf("Please write a concise and descriptive pull request description for the following changes. Include a summary of the changes and any important notes for reviewers:\n\n%s", history)
-	description, err := cli.model.Query(context.Background(), query)
+	// Ask AI for PR description and title
+	var description, title string
+	err = WithSpinner("Generating pull request description...", func() error {
+		query := fmt.Sprintf("Please write a concise and descriptive pull request description for the following changes. Include a summary of the changes and any important notes for reviewers:\n\n%s", history)
+		var err error
+		description, err = cli.model.Query(context.Background(), query)
+		if err != nil {
+			return err
+		}
+
+		// Clean up the description
+		description = cleanMarkdownCodeBlocks(description)
+
+		// Ask AI to generate a clean title based on the description
+		titleQuery := fmt.Sprintf("Based on this pull request description, generate a concise, descriptive title (max 72 chars) that follows conventional commits format. Return only the title, no markdown or quotes:\n\n%s", description)
+		title, err = cli.model.Query(context.Background(), titleQuery)
+		if err != nil {
+			return err
+		}
+
+		// Clean up the title
+		title = cleanMarkdownCodeBlocks(title)
+		title = strings.TrimSpace(title)
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("error getting PR description from AI: %w", err)
+		return fmt.Errorf("error getting PR content from AI: %w", err)
 	}
-
-	// Clean up the description
-	description = cleanMarkdownCodeBlocks(description)
-
-	// Ask AI to generate a clean title based on the description
-	titleQuery := fmt.Sprintf("Based on this pull request description, generate a concise, descriptive title (max 72 chars) that follows conventional commits format. Return only the title, no markdown or quotes:\n\n%s", description)
-	title, err := cli.model.Query(context.Background(), titleQuery)
-	if err != nil {
-		return fmt.Errorf("error getting PR title from AI: %w", err)
-	}
-
-	// Clean up the title
-	title = cleanMarkdownCodeBlocks(title)
-	title = strings.TrimSpace(title)
 
 	// Check if a PR already exists for this branch
 	hasPR, err := cli.github.HasOpenPullRequest()

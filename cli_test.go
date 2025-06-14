@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 type mockModel struct {
@@ -12,6 +13,8 @@ type mockModel struct {
 }
 
 func (m *mockModel) Query(ctx context.Context, query string) (string, error) {
+	// Add a small delay to simulate AI processing time
+	time.Sleep(50 * time.Millisecond)
 	return m.queryFunc(ctx, query)
 }
 
