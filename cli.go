@@ -135,8 +135,16 @@ func (cli *Cli) createPR(cmd *cobra.Command, args []string) error {
 	// Clean up the description
 	description = cleanMarkdownCodeBlocks(description)
 
-	// Create PR title from the first line of the description
-	title := strings.Split(description, "\n")[0]
+	// Ask AI to generate a clean title based on the description
+	titleQuery := fmt.Sprintf("Based on this pull request description, generate a concise, descriptive title (max 72 chars) that follows conventional commits format. Return only the title, no markdown or quotes:\n\n%s", description)
+	title, err := cli.model.Query(context.Background(), titleQuery)
+	if err != nil {
+		return fmt.Errorf("error getting PR title from AI: %w", err)
+	}
+
+	// Clean up the title
+	title = cleanMarkdownCodeBlocks(title)
+	title = strings.TrimSpace(title)
 
 	// Check if a PR already exists for this branch
 	hasPR, err := cli.github.HasOpenPullRequest()

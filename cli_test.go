@@ -54,11 +54,21 @@ func (m *mockGit) ForcePush() error {
 }
 
 type mockGitHub struct {
-	createPRFunc func(title, description string) error
+	createPRFunc           func(title, description string) error
+	editPRFunc             func(title, description string) error
+	hasOpenPullRequestFunc func() (bool, error)
 }
 
 func (m *mockGitHub) CreatePullRequest(title, description string) error {
 	return m.createPRFunc(title, description)
+}
+
+func (m *mockGitHub) EditPullRequest(title, description string) error {
+	return m.editPRFunc(title, description)
+}
+
+func (m *mockGitHub) HasOpenPullRequest() (bool, error) {
+	return m.hasOpenPullRequestFunc()
 }
 
 func TestCli_Commit(t *testing.T) {
@@ -96,10 +106,13 @@ func TestCli_Commit(t *testing.T) {
 }
 
 func TestCli_CreatePR(t *testing.T) {
-	// Create a mock model that returns a predefined PR description
+	// Create a mock model that returns a predefined PR description and title
 	model := &mockModel{
 		queryFunc: func(ctx context.Context, query string) (string, error) {
-			return "feat: add new feature\n\nThis PR adds a new feature that improves the user experience.", nil
+			if strings.Contains(query, "generate a concise, descriptive title") {
+				return "feat: add new feature", nil
+			}
+			return "This PR adds a new feature that improves the user experience.", nil
 		},
 	}
 
@@ -125,7 +138,13 @@ func TestCli_CreatePR(t *testing.T) {
 	// Create a mock GitHub that succeeds on PR creation
 	github := &mockGitHub{
 		createPRFunc: func(title, description string) error {
+			if title != "feat: add new feature" {
+				t.Errorf("Expected title 'feat: add new feature', got '%s'", title)
+			}
 			return nil
+		},
+		hasOpenPullRequestFunc: func() (bool, error) {
+			return false, nil
 		},
 	}
 
@@ -219,10 +238,13 @@ func TestCli_Commit_WithMarkdown(t *testing.T) {
 }
 
 func TestCli_CreatePR_WithMarkdown(t *testing.T) {
-	// Create a mock model that returns a PR description wrapped in markdown code blocks
+	// Create a mock model that returns a PR description and title wrapped in markdown
 	model := &mockModel{
 		queryFunc: func(ctx context.Context, query string) (string, error) {
-			return "```\nfeat: add new feature\n\nThis PR adds a new feature that improves the user experience.\n```", nil
+			if strings.Contains(query, "generate a concise, descriptive title") {
+				return "```\nfeat: add new feature\n```", nil
+			}
+			return "```\nThis PR adds a new feature that improves the user experience.\n```", nil
 		},
 	}
 
@@ -245,11 +267,11 @@ func TestCli_CreatePR_WithMarkdown(t *testing.T) {
 		},
 	}
 
-	// Create a mock GitHub that verifies the cleaned description
+	// Create a mock GitHub that verifies the cleaned description and title
 	github := &mockGitHub{
 		createPRFunc: func(title, description string) error {
 			expectedTitle := "feat: add new feature"
-			expectedDesc := "feat: add new feature\n\nThis PR adds a new feature that improves the user experience."
+			expectedDesc := "This PR adds a new feature that improves the user experience."
 			if title != expectedTitle {
 				t.Errorf("Expected title %q, got %q", expectedTitle, title)
 			}
@@ -257,6 +279,9 @@ func TestCli_CreatePR_WithMarkdown(t *testing.T) {
 				t.Errorf("Expected description %q, got %q", expectedDesc, description)
 			}
 			return nil
+		},
+		hasOpenPullRequestFunc: func() (bool, error) {
+			return false, nil
 		},
 	}
 
@@ -270,12 +295,17 @@ func TestCli_CreatePR_WithMarkdown(t *testing.T) {
 }
 
 func TestCli_CreatePR_GitHubError(t *testing.T) {
+	// Create a mock model that returns a predefined PR description
 	model := &mockModel{
 		queryFunc: func(ctx context.Context, query string) (string, error) {
-			return "feat: add new feature\n\nThis PR adds a new feature.", nil
+			if strings.Contains(query, "generate a concise, descriptive title") {
+				return "feat: add new feature", nil
+			}
+			return "This PR adds a new feature that improves the user experience.", nil
 		},
 	}
 
+	// Create a mock git that returns branch info
 	git := &mockGit{
 		getCurrentBranchFunc: func() (string, error) {
 			return "feature-branch", nil
@@ -284,7 +314,7 @@ func TestCli_CreatePR_GitHubError(t *testing.T) {
 			return "main", nil
 		},
 		getCommitHistoryFunc: func(baseBranch string) (string, error) {
-			return "abc123 feat: add new feature", nil
+			return "abc123 feat: add new feature\ndef456 fix: bug in feature", nil
 		},
 		pushFunc: func() error {
 			return nil
@@ -294,10 +324,16 @@ func TestCli_CreatePR_GitHubError(t *testing.T) {
 		},
 	}
 
-	// Create a mock GitHub that returns an error with output
+	// Create a mock GitHub that fails on PR creation
 	github := &mockGitHub{
 		createPRFunc: func(title, description string) error {
-			return fmt.Errorf("command failed: exit status 1\nOutput: Error: Not authenticated with GitHub. Run 'gh auth login' to authenticate.")
+			return fmt.Errorf("gh auth login")
+		},
+		hasOpenPullRequestFunc: func() (bool, error) {
+			return false, nil
+		},
+		editPRFunc: func(title, description string) error {
+			return nil
 		},
 	}
 
@@ -308,45 +344,35 @@ func TestCli_CreatePR_GitHubError(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "Not authenticated with GitHub") {
-		t.Errorf("Expected error about GitHub authentication, got: %v", err)
+	if !strings.Contains(err.Error(), "gh auth login") {
+		t.Errorf("Expected error to contain 'gh auth login', got: %v", err)
 	}
 }
 
 func TestCli_CreatePR_WithForcePush(t *testing.T) {
 	model := &mockModel{
 		queryFunc: func(ctx context.Context, query string) (string, error) {
-			return "feat: add new feature\n\nThis PR adds a new feature.", nil
+			if strings.Contains(query, "generate a concise, descriptive title") {
+				return "feat: force push feature", nil
+			}
+			return "This PR adds a new feature that required force push.", nil
 		},
 	}
-
 	git := &mockGit{
-		getCurrentBranchFunc: func() (string, error) {
-			return "feature-branch", nil
-		},
-		getBaseBranchFunc: func() (string, error) {
-			return "main", nil
-		},
+		getCurrentBranchFunc: func() (string, error) { return "feature-branch", nil },
+		getBaseBranchFunc:    func() (string, error) { return "main", nil },
 		getCommitHistoryFunc: func(baseBranch string) (string, error) {
-			return "abc123 feat: add new feature", nil
+			return "abc123 feat: add new feature\ndef456 fix: bug in feature", nil
 		},
-		pushFunc: func() error {
-			return fmt.Errorf("push failed")
-		},
-		forcePushFunc: func() error {
-			return nil
-		},
+		pushFunc:      func() error { return fmt.Errorf("push failed") },
+		forcePushFunc: func() error { return nil },
 	}
-
 	github := &mockGitHub{
-		createPRFunc: func(title, description string) error {
-			return nil
-		},
+		createPRFunc:           func(title, description string) error { return nil },
+		hasOpenPullRequestFunc: func() (bool, error) { return false, nil },
+		editPRFunc:             func(title, description string) error { return nil },
 	}
-
 	cli := NewCli(model, git, github)
-
-	// Test the PR command
 	err := cli.Run([]string{"aigit", "pr"})
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
