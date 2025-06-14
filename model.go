@@ -14,7 +14,7 @@ type Model interface {
 
 func GetDefaultModel() Model {
 	if _, exists := os.LookupEnv("ANTHROPIC_API_KEY"); exists {
-		return &AnthropicModel{}
+		return NewAnthropicModel()
 	}
 	panic("No model configured.")
 }
@@ -30,7 +30,7 @@ func NewAnthropicModel() *AnthropicModel {
 }
 
 func (m *AnthropicModel) Query(ctx context.Context, query string) (string, error) {
-	message, err := m.client.Messages.New(context.TODO(), anthropic.MessageNewParams{
+	message, err := m.client.Messages.New(ctx, anthropic.MessageNewParams{
 		MaxTokens: 1024,
 		Messages: []anthropic.MessageParam{{
 			Content: []anthropic.ContentBlockParamUnion{{
