@@ -26,6 +26,7 @@ type mockGit struct {
 	getCommitHistoryFunc func(baseBranch string) (string, error)
 	pushFunc             func() error
 	forcePushFunc        func() error
+	amendFunc            func(message string) error
 }
 
 func (m *mockGit) GetStagedDiff() (string, error) {
@@ -54,6 +55,10 @@ func (m *mockGit) Push() error {
 
 func (m *mockGit) ForcePush() error {
 	return m.forcePushFunc()
+}
+
+func (m *mockGit) Amend(message string) error {
+	return m.amendFunc(message)
 }
 
 type mockGitHub struct {
@@ -422,5 +427,142 @@ func TestCli_CreatePR_PushFailed(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to push branch") {
 		t.Errorf("Expected error about push failure, got: %v", err)
+	}
+}
+
+func TestCleanMarkdownCodeBlocks(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple text",
+			input:    "feat: add new feature",
+			expected: "feat: add new feature",
+		},
+		{
+			name:     "with markdown",
+			input:    "```\nfeat: add new feature\n```",
+			expected: "feat: add new feature",
+		},
+		{
+			name:     "with AI prefix",
+			input:    "AI: feat: add new feature",
+			expected: "feat: add new feature",
+		},
+		{
+			name:     "with AI prefix and markdown",
+			input:    "```\nAI: feat: add new feature\n```",
+			expected: "feat: add new feature",
+		},
+		{
+			name:     "with duplicate lines",
+			input:    "feat: add new feature\n\nfeat: add new feature",
+			expected: "feat: add new feature",
+		},
+		{
+			name:     "with AI prefix and duplicate lines",
+			input:    "AI: feat: add new feature\n\nfeat: add new feature",
+			expected: "feat: add new feature",
+		},
+		{
+			name:     "with AI prefix, markdown, and duplicate lines",
+			input:    "```\nAI: feat: add new feature\n\nfeat: add new feature\n```",
+			expected: "feat: add new feature",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := cleanMarkdownCodeBlocks(tt.input)
+			if result != tt.expected {
+				t.Errorf("cleanMarkdownCodeBlocks(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCli_Amend(t *testing.T) {
+	// Create a mock model that returns a predefined commit message
+	model := &mockModel{
+		queryFunc: func(ctx context.Context, query string) (string, error) {
+			return "test: update feature", nil
+		},
+	}
+
+	// Create a mock git that returns staged changes
+	git := &mockGit{
+		getStagedDiffFunc: func() (string, error) {
+			return "diff --git a/file.txt b/file.txt\nindex abc123..def456 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old line\n+new line", nil
+		},
+		amendFunc: func(message string) error {
+			return nil
+		},
+	}
+
+	cli := NewCli(model, git, nil)
+
+	// Test the amend command
+	err := cli.Run([]string{"aigit", "amend"})
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+func TestCli_Amend_NoChanges(t *testing.T) {
+	// Create a mock model
+	model := &mockModel{
+		queryFunc: func(ctx context.Context, query string) (string, error) {
+			return "test: update feature", nil
+		},
+	}
+
+	// Create a mock git that returns no staged changes
+	git := &mockGit{
+		getStagedDiffFunc: func() (string, error) {
+			return "", nil
+		},
+	}
+
+	cli := NewCli(model, git, nil)
+
+	// Test the amend command
+	err := cli.Run([]string{"aigit", "amend"})
+	if err == nil {
+		t.Error("Expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "no changes staged for amend") {
+		t.Errorf("Expected error about no changes, got: %v", err)
+	}
+}
+
+func TestCli_Amend_WithMarkdown(t *testing.T) {
+	// Create a mock model that returns a commit message wrapped in markdown
+	model := &mockModel{
+		queryFunc: func(ctx context.Context, query string) (string, error) {
+			return "```\ntest: update feature\n```", nil
+		},
+	}
+
+	// Create a mock git that returns staged changes
+	git := &mockGit{
+		getStagedDiffFunc: func() (string, error) {
+			return "diff --git a/file.txt b/file.txt\nindex abc123..def456 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old line\n+new line", nil
+		},
+		amendFunc: func(message string) error {
+			if message != "test: update feature" {
+				t.Errorf("Expected message 'test: update feature', got '%s'", message)
+			}
+			return nil
+		},
+	}
+
+	cli := NewCli(model, git, nil)
+
+	// Test the amend command
+	err := cli.Run([]string{"aigit", "amend"})
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }

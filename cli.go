@@ -35,6 +35,13 @@ func NewCli(model Model, git Git, github GitHub) *Cli {
 		RunE:  cli.commit,
 	}
 
+	amendCmd := &cobra.Command{
+		Use:   "amend",
+		Short: "Amend the last commit with staged changes and regenerate the message",
+		Long:  `Amend the last commit with staged changes and generate a new commit message using AI.`,
+		RunE:  cli.amend,
+	}
+
 	prCmd := &cobra.Command{
 		Use:   "pr",
 		Short: "Create a pull request with an AI-generated description",
@@ -43,6 +50,7 @@ func NewCli(model Model, git Git, github GitHub) *Cli {
 	}
 
 	cli.root.AddCommand(commitCmd)
+	cli.root.AddCommand(amendCmd)
 	cli.root.AddCommand(prCmd)
 	return cli
 }
@@ -52,13 +60,31 @@ func (cli *Cli) Run(args []string) error {
 	return cli.root.Execute()
 }
 
-// cleanMarkdownCodeBlocks removes markdown code block markers from the text
+// cleanMarkdownCodeBlocks removes markdown code block markers and AI prefixes from the text
 func cleanMarkdownCodeBlocks(text string) string {
 	// Remove ``` at the start and end of the text
 	text = strings.TrimSpace(text)
 	text = strings.TrimPrefix(text, "```")
 	text = strings.TrimSuffix(text, "```")
-	return strings.TrimSpace(text)
+	text = strings.TrimSpace(text)
+
+	// Remove "AI:" prefix if present
+	text = strings.TrimPrefix(text, "AI:")
+	text = strings.TrimSpace(text)
+
+	// Remove duplicate lines
+	lines := strings.Split(text, "\n")
+	seen := make(map[string]bool)
+	var uniqueLines []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && !seen[line] {
+			seen[line] = true
+			uniqueLines = append(uniqueLines, line)
+		}
+	}
+
+	return strings.Join(uniqueLines, "\n")
 }
 
 func (cli *Cli) commit(cmd *cobra.Command, args []string) error {
@@ -93,6 +119,41 @@ func (cli *Cli) commit(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Committed with message:\n%s\n", message)
+	return nil
+}
+
+func (cli *Cli) amend(cmd *cobra.Command, args []string) error {
+	// Get staged changes
+	diff, err := cli.git.GetStagedDiff()
+	if err != nil {
+		return fmt.Errorf("error getting staged changes: %w", err)
+	}
+
+	if diff == "" {
+		return fmt.Errorf("no changes staged for amend")
+	}
+
+	// Ask AI for commit message
+	var message string
+	err = WithSpinner("Generating commit message...", func() error {
+		query := fmt.Sprintf("Please write a concise and descriptive commit message, adhering to conventional commits and in plain text, for the following changes:\n\n%s", diff)
+		var err error
+		message, err = cli.model.Query(context.Background(), query)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("error getting commit message from AI: %w", err)
+	}
+
+	// Clean up the message
+	message = cleanMarkdownCodeBlocks(message)
+
+	// Execute git amend
+	if err := cli.git.Amend(message); err != nil {
+		return fmt.Errorf("error amending commit: %w", err)
+	}
+
+	fmt.Printf("Amended commit with message:\n%s\n", message)
 	return nil
 }
 
